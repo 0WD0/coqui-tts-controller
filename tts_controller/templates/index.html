@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>{{ title }}</title>
+	<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+	<div class="container mx-auto px-4 py-8">
+		<h1 class="text-3xl font-bold mb-8">TTS Controller</h1>
+		
+		<!-- Model Control Panel -->
+		<div class="bg-white rounded-lg shadow-md p-6 mb-8">
+			<h2 class="text-xl font-semibold mb-4">Available Models</h2>
+			<div id="modelList" class="space-y-4">
+				<!-- Models will be dynamically inserted here -->
+			</div>
+		</div>
+
+		<!-- Text Input Panel -->
+		<div class="bg-white rounded-lg shadow-md p-6">
+			<h2 class="text-xl font-semibold mb-4">Text Synthesis</h2>
+			<div class="space-y-4">
+				<div class="flex flex-col space-y-2">
+					<label for="textInput" class="font-medium">Text to synthesize:</label>
+					<textarea
+						id="textInput"
+						class="w-full h-32 p-2 border rounded-lg resize-none"
+						placeholder="Enter text to synthesize..."
+					></textarea>
+				</div>
+				
+				<div class="flex flex-col space-y-2">
+					<label for="speakerInput" class="font-medium">Speaker name (optional):</label>
+					<input
+						type="text"
+						id="speakerInput"
+						class="w-full p-2 border rounded-lg"
+						placeholder="Enter speaker name..."
+					/>
+				</div>
+
+				<div class="flex items-center space-x-4">
+					<button
+						id="synthesizeBtn"
+						class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 disabled:bg-gray-400"
+						disabled
+					>
+						Synthesize
+					</button>
+					<div id="loadingIndicator" class="hidden">
+						<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+					</div>
+				</div>
+
+				<!-- Audio Player -->
+				<div id="audioPlayer" class="hidden">
+					<audio controls class="w-full">
+						<source id="audioSource" type="audio/wav">
+						Your browser does not support the audio element.
+					</audio>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<script>
+		let activeModel = null;
+
+		// Fetch and display available models
+		async function fetchModels() {
+			try {
+				const response = await fetch('/api/models');
+				const data = await response.json();
+				const modelList = document.getElementById('modelList');
+				modelList.innerHTML = '';
+
+				Object.entries(data.models).forEach(([modelId, model]) => {
+					const modelDiv = document.createElement('div');
+					modelDiv.className = 'flex items-center justify-between p-4 border rounded-lg';
+					modelDiv.innerHTML = `
+						<div>
+							<span class="font-medium">${model.name}</span>
+							${model.port ? `<span class="text-sm text-gray-500 ml-2">(Port: ${model.port})</span>` : ''}
+						</div>
+						<button
+							class="px-4 py-2 rounded-lg ${model.loaded ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white"
+							onclick="toggleModel('${modelId}', ${model.loaded})"
+						>
+							${model.loaded ? 'Unload' : 'Load'}
+						</button>
+					`;
+					modelList.appendChild(modelDiv);
+				});
+
+				// Update synthesize button state
+				const synthesizeBtn = document.getElementById('synthesizeBtn');
+				synthesizeBtn.disabled = !Object.values(data.models).some(m => m.loaded);
+
+				// Update active model
+				activeModel = Object.entries(data.models).find(([_, m]) => m.loaded)?.[0] || null;
+			} catch (error) {
+				console.error('Failed to fetch models:', error);
+			}
+		}
+
+		// Toggle model loading state
+		async function toggleModel(modelId, isLoaded) {
+			try {
+				const action = isLoaded ? 'unload' : 'load';
+				const response = await fetch(`/api/models/${modelId}/${action}`, {
+					method: 'POST'
+				});
+				
+				if (response.ok) {
+					await fetchModels();
+				} else {
+					const error = await response.json();
+					alert(error.detail || 'Failed to toggle model');
+				}
+			} catch (error) {
+				console.error('Failed to toggle model:', error);
+				alert('Failed to toggle model');
+			}
+		}
+
+		// Handle text synthesis
+		async function synthesizeText() {
+			const text = document.getElementById('textInput').value.trim();
+			const speaker = document.getElementById('speakerInput').value.trim();
+			const synthesizeBtn = document.getElementById('synthesizeBtn');
+			const loadingIndicator = document.getElementById('loadingIndicator');
+			const audioPlayer = document.getElementById('audioPlayer');
+			
+			if (!text) {
+				alert('Please enter text to synthesize');
+				return;
+			}
+
+			try {
+				synthesizeBtn.disabled = true;
+				loadingIndicator.classList.remove('hidden');
+				audioPlayer.classList.add('hidden');
+
+				const params = new URLSearchParams({
+					text: text,
+					model_id: activeModel
+				});
+				if (speaker) {
+					params.append('speaker_name', speaker);
+				}
+
+				const response = await fetch(`/api/synthesize?${params.toString()}`, {
+					method: 'POST'
+				});
+
+				if (response.ok) {
+					const blob = await response.blob();
+					const audioUrl = URL.createObjectURL(blob);
+					
+					const audioSource = document.getElementById('audioSource');
+					audioSource.src = audioUrl;
+					
+					const audio = audioPlayer.querySelector('audio');
+					audio.load();
+					audioPlayer.classList.remove('hidden');
+				} else {
+					const error = await response.json();
+					alert(error.detail || 'Failed to synthesize text');
+				}
+			} catch (error) {
+				console.error('Failed to synthesize text:', error);
+				alert('Failed to synthesize text');
+			} finally {
+				synthesizeBtn.disabled = false;
+				loadingIndicator.classList.add('hidden');
+			}
+		}
+
+		// Initialize
+		document.addEventListener('DOMContentLoaded', () => {
+			fetchModels();
+			
+			// Add click handler for synthesize button
+			document.getElementById('synthesizeBtn').addEventListener('click', synthesizeText);
+		});
+	</script>
+</body>
+</html>
