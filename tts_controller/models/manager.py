@@ -7,6 +7,7 @@ from typing import Dict, Optional
 import requests
 import os
 import signal
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,9 @@ class TTSServer:
 			server_cmd = f"tts-server --model_name '{self.model_name}' --use_cuda --port {self.port}"
 			full_cmd = f"{activate_cmd} && {server_cmd}"
 			
+			logger.info(f"Starting TTS server for {self.model_name} on port {self.port}")
+			logger.debug(f"Command: {full_cmd}")
+			
 			# Start the server process
 			self.process = subprocess.Popen(
 				full_cmd,
@@ -41,27 +45,26 @@ class TTSServer:
 			)
 			
 			# Wait for server to start
-			for _ in range(30):  # Wait up to 30 seconds
+			max_attempts = 120  
+			for attempt in range(max_attempts):
 				try:
-					response = requests.get(f"{self.url}/health")
+					# 使用根路径检查服务器是否启动
+					response = requests.get(f"{self.url}/", timeout=1)
 					if response.status_code == 200:
-						logger.info(f"TTS server for {self.model_name} started on port {self.port}")
+						logger.info(f"TTS server started successfully on port {self.port}")
 						return True
-				except requests.exceptions.ConnectionError:
+				except requests.exceptions.RequestException:
 					await asyncio.sleep(1)
-					
-				# Check if process has failed
-				if self.process.poll() is not None:
-					stderr = self.process.stderr.read()
-					logger.error(f"TTS server failed to start: {stderr}")
-					return False
+					continue
 			
-			logger.error(f"Timeout waiting for TTS server {self.model_name} to start")
-			await self.stop()  # Clean up the process
+			logger.error(f"TTS server failed to start on port {self.port} after {max_attempts} attempts")
 			return False
 			
 		except Exception as e:
 			logger.error(f"Failed to start TTS server {self.model_name}: {str(e)}")
+			if self.process:
+				stderr = self.process.stderr.read()
+				logger.error(f"Process stderr: {stderr}")
 			return False
 
 	async def stop(self) -> bool:
@@ -113,12 +116,46 @@ class TTSServer:
 			if speaker_name:
 				params["speaker_name"] = speaker_name
 			
-			response = requests.get(f"{self.url}/api/tts", params=params)
-			if response.status_code == 200:
-				return response.content
-			else:
-				logger.error(f"Synthesis failed: {response.text}")
-				return None
+			# 增加超时设置和重试机制
+			max_retries = 3
+			retry_delay = 1
+			timeout = 30  # 30秒超时
+
+			for attempt in range(max_retries):
+				try:
+					response = requests.get(
+						f"{self.url}/api/tts",
+						params=params,
+						timeout=timeout
+					)
+					
+					if response.status_code == 200:
+						return response.content
+					elif response.status_code == 503:
+						# 服务暂时不可用，等待后重试
+						logger.warning(f"TTS server temporarily unavailable, retrying... (attempt {attempt + 1}/{max_retries})")
+						await asyncio.sleep(retry_delay)
+						continue
+					else:
+						error_msg = response.text
+						logger.error(f"Synthesis failed with status {response.status_code}: {error_msg}")
+						return None
+						
+				except requests.exceptions.Timeout:
+					logger.warning(f"Request timeout, retrying... (attempt {attempt + 1}/{max_retries})")
+					await asyncio.sleep(retry_delay)
+					continue
+				except requests.exceptions.ConnectionError:
+					logger.warning(f"Connection error, retrying... (attempt {attempt + 1}/{max_retries})")
+					await asyncio.sleep(retry_delay)
+					continue
+				except Exception as e:
+					logger.error(f"Unexpected error during synthesis: {str(e)}")
+					return None
+			
+			logger.error("Max retries reached, synthesis failed")
+			return None
+			
 		except Exception as e:
 			logger.error(f"Failed to synthesize text: {str(e)}")
 			return None
@@ -151,21 +188,32 @@ class TTSModelManager:
 			raise ValueError(f"Unknown model: {model_id}")
 
 		if self.active_model:
-			# Unload currently active model
+			logger.info(f"Unloading active model {self.active_model} before loading {model_id}")
 			await self.unload_model(self.active_model)
 
 		try:
 			model = self.models[model_id]
 			port = self.base_port + len([m for m in self.models.values() if m["loaded"]])
 			
+			logger.info(f"Starting to load model {model_id} on port {port}")
 			server = TTSServer(model["model_name"], port)
+			
+			# 设置更长的启动等待时间
+			start_timeout = 300  # 5分钟超时
+			start_time = time.time()
+			
 			if await server.start(self.venv_path):
 				model["loaded"] = True
 				model["instance"] = server
 				self.active_model = model_id
-				logger.info(f"Loaded model: {model_id}")
+				
+				elapsed_time = time.time() - start_time
+				logger.info(f"Successfully loaded model {model_id} in {elapsed_time:.1f} seconds")
 				return True
+				
+			logger.error(f"Failed to load model {model_id} within {start_timeout} seconds")
 			return False
+			
 		except Exception as e:
 			logger.error(f"Failed to load model {model_id}: {str(e)}")
 			return False

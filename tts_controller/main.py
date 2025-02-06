@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from typing import Optional
 import uvicorn
 from io import BytesIO
 
@@ -56,7 +57,7 @@ async def unload_model(model_id: str):
 		raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/synthesize")
-async def synthesize_text(text: str, model_id: str = None, speaker_name: str = None):
+async def synthesize_text(text: str, model_id: Optional[str] = None, speaker_name: Optional[str] = None):
 	"""Synthesize text using the specified model."""
 	try:
 		audio_data = await model_manager.synthesize(text, model_id, speaker_name)
