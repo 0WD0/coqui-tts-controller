@@ -145,14 +145,17 @@ class TTSServer:
 		except Exception as e:
 			logger.warning(f"Failed to kill process on port {port}: {str(e)}")
 
-	async def synthesize(self, text: str, speaker_name: Optional[str] = None, language: Optional[str] = None) -> Optional[bytes]:
+	async def synthesize(self, text: str, speaker_id: Optional[str] = None, language_id: Optional[str] = None) -> Optional[bytes]:
 		"""Synthesize text using the TTS server."""
 		try:
-			params = {"text": text}
-			if speaker_name and speaker_name in self.speakers:
-				params["speaker_id"] = speaker_name
-			if language and language in self.languages:
-				params["language_id"] = language
+			params = {
+				"text": text,
+				"style_wav": ""  # 这是 tts-server 需要的参数
+			}
+			if speaker_id and speaker_id in self.speakers:
+				params["speaker_id"] = speaker_id
+			if language_id and language_id in self.languages:
+				params["language_id"] = language_id
 			
 			# 增加超时设置和重试机制
 			max_retries = 3
@@ -293,7 +296,7 @@ class TTSModelManager:
 			logger.error(f"Failed to unload model {model_id}: {str(e)}")
 			return False
 
-	async def synthesize(self, text: str, model_id: Optional[str] = None, speaker_name: Optional[str] = None, language: Optional[str] = None) -> Optional[bytes]:
+	async def synthesize(self, text: str, model_id: Optional[str] = None, speaker_id: Optional[str] = None, language_id: Optional[str] = None) -> Optional[bytes]:
 		"""Synthesize text using the specified or active model."""
 		model_id = model_id or self.active_model
 		if not model_id:
@@ -306,7 +309,7 @@ class TTSModelManager:
 		if not model["loaded"] or not model["instance"]:
 			raise ValueError(f"Model {model_id} is not loaded")
 		
-		return await model["instance"].synthesize(text, speaker_name, language)
+		return await model["instance"].synthesize(text, speaker_id, language_id)
 
 	def get_active_model(self) -> Optional[str]:
 		"""Get the currently active model ID."""

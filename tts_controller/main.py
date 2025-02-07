@@ -1,12 +1,12 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
+from fastapi import FastAPI, Request, HTTPException, Response
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Optional
 import uvicorn
-from io import BytesIO
-import os
-import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .models import TTSModelManager
 
@@ -59,38 +59,22 @@ async def unload_model(model_id: str):
 		raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/synthesize")
-async def synthesize_text(
+async def synthesize(
 	text: str,
 	model_id: Optional[str] = None,
-	speaker_name: Optional[str] = None,
-	language: Optional[str] = None
-):
-	"""Synthesize text using the specified model."""
+	speaker_id: Optional[str] = None,
+	language_id: Optional[str] = None,
+	style_wav: Optional[str] = None
+) -> Response:
+	"""Synthesize text to speech."""
 	try:
-		audio_data = await model_manager.synthesize(text, model_id, speaker_name, language)
+		audio_data = await model_manager.synthesize(text, model_id, speaker_id, language_id)
 		if audio_data:
-			# Create a temporary file
-			with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-				temp_file.write(audio_data)
-				temp_file_path = temp_file.name
-
-			# Return the audio file
-			return FileResponse(
-				temp_file_path,
-				media_type="audio/wav",
-				filename="synthesis.wav",
-				background=None  # Don't delete in background
-			)
-		raise HTTPException(status_code=500, detail="Failed to synthesize text")
-	except ValueError as e:
-		raise HTTPException(status_code=404, detail=str(e))
-	finally:
-		# Clean up the temporary file
-		if 'temp_file_path' in locals():
-			try:
-				os.unlink(temp_file_path)
-			except Exception:
-				pass
+			return Response(content=audio_data, media_type="audio/wav")
+		return Response(status_code=500, content="Failed to synthesize text")
+	except Exception as e:
+		logger.error(f"Error during synthesis: {str(e)}")
+		return Response(status_code=500, content=str(e))
 
 if __name__ == "__main__":
 	uvicorn.run("tts_controller.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -166,28 +166,34 @@
 
 		async function synthesize() {
 			const text = document.getElementById('text-input').value;
-			const speaker = document.getElementById('speaker-select').value;
-			const language = document.getElementById('language-select').value;
+			const speaker_id = document.getElementById('speaker-select').value;
+			const language_id = document.getElementById('language-select').value;
 			
 			if (!text) {
 				alert('Please enter text to synthesize');
 				return;
 			}
-
+			
 			try {
 				const params = new URLSearchParams({
 					text: text,
-					speaker_name: speaker,
-					language: language
+					style_wav: ''  // 这是 tts-server 需要的参数
 				});
-
+				
+				if (speaker_id) {
+					params.append('speaker_id', speaker_id);
+				}
+				if (language_id) {
+					params.append('language_id', language_id);
+				}
+				
 				const response = await fetch(`/synthesize?${params.toString()}`);
 				if (response.ok) {
-					const blob = await response.blob();
-					const audioUrl = URL.createObjectURL(blob);
-					const audioPlayer = document.getElementById('audio-player');
-					audioPlayer.src = audioUrl;
-					audioPlayer.play();
+					const audioBlob = await response.blob();
+					const audioUrl = URL.createObjectURL(audioBlob);
+					const audio = document.getElementById('audio-player');
+					audio.src = audioUrl;
+					audio.play();
 				} else {
 					alert('Failed to synthesize text');
 				}
