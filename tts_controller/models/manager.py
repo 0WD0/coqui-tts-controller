@@ -8,6 +8,7 @@ import requests
 import os
 import signal
 import time
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,38 @@ class TTSServer:
 	def __init__(self, model_name: str, port: int):
 		self.model_name = model_name
 		self.port = port
-		self.process: Optional[subprocess.Popen] = None
 		self.url = f"http://localhost:{port}"
+		self.process: Optional[subprocess.Popen] = None
+		self.speakers = []
+		self.languages = []
+
+	async def _fetch_model_info(self) -> bool:
+		"""获取模型支持的 speakers 和 languages"""
+		try:
+			response = requests.get(f"{self.url}/")
+			if response.status_code == 200:
+				html = response.text
+				# 解析 speakers
+				speaker_match = re.search(r'id="speaker_id"[^>]*>(.*?)</select>', html, re.DOTALL)
+				if speaker_match:
+					self.speakers = re.findall(r'value="([^"]+)"', speaker_match.group(1))
+				
+				# 解析 languages
+				language_match = re.search(r'id="language_id"[^>]*>(.*?)</select>', html, re.DOTALL)
+				if language_match:
+					self.languages = re.findall(r'value="([^"]+)"', language_match.group(1))
+				
+				# 如果没有找到，使用默认值
+				if not self.speakers:
+					self.speakers = ["default"]
+				if not self.languages:
+					self.languages = ["en"]
+			
+			logger.info(f"Model {self.model_name} supports {len(self.speakers)} speakers and {len(self.languages)} languages")
+			return True
+		except Exception as e:
+			logger.error(f"Failed to fetch model info: {str(e)}")
+			return False
 
 	async def start(self, venv_path: str) -> bool:
 		"""Start the TTS server."""
@@ -52,7 +83,12 @@ class TTSServer:
 					response = requests.get(f"{self.url}/", timeout=1)
 					if response.status_code == 200:
 						logger.info(f"TTS server started successfully on port {self.port}")
-						return True
+						# 获取模型信息
+						if await self._fetch_model_info():
+							return True
+						else:
+							logger.warning("Server started but failed to fetch model info")
+							return True
 				except requests.exceptions.RequestException:
 					await asyncio.sleep(1)
 					continue
@@ -109,12 +145,14 @@ class TTSServer:
 		except Exception as e:
 			logger.warning(f"Failed to kill process on port {port}: {str(e)}")
 
-	async def synthesize(self, text: str, speaker_name: Optional[str] = None) -> Optional[bytes]:
+	async def synthesize(self, text: str, speaker_name: Optional[str] = None, language: Optional[str] = None) -> Optional[bytes]:
 		"""Synthesize text using the TTS server."""
 		try:
 			params = {"text": text}
-			if speaker_name:
-				params["speaker_name"] = speaker_name
+			if speaker_name and speaker_name in self.speakers:
+				params["speaker_id"] = speaker_name
+			if language and language in self.languages:
+				params["language_id"] = language
 			
 			# 增加超时设置和重试机制
 			max_retries = 3
@@ -170,6 +208,18 @@ class TTSModelManager:
 			"xtts_v2": {
 				"name": "XTTS v2",
 				"model_name": "tts_models/multilingual/multi-dataset/xtts_v2",
+				"loaded": False,
+				"instance": None
+			},
+			"greek_vits": {
+				"name": "greek vits",
+				"model_name": "tts_models/el/cv/vits",
+				"loaded": False,
+				"instance": None
+			},
+			"tacotron2-DDC": {
+				"name": "tocotran2 DDC",
+				"model_name": "tts_models/ja/kokoro/tacotron2-DDC",
 				"loaded": False,
 				"instance": None
 			},
@@ -243,7 +293,7 @@ class TTSModelManager:
 			logger.error(f"Failed to unload model {model_id}: {str(e)}")
 			return False
 
-	async def synthesize(self, text: str, model_id: Optional[str] = None, speaker_name: Optional[str] = None) -> Optional[bytes]:
+	async def synthesize(self, text: str, model_id: Optional[str] = None, speaker_name: Optional[str] = None, language: Optional[str] = None) -> Optional[bytes]:
 		"""Synthesize text using the specified or active model."""
 		model_id = model_id or self.active_model
 		if not model_id:
@@ -256,19 +306,26 @@ class TTSModelManager:
 		if not model["loaded"] or not model["instance"]:
 			raise ValueError(f"Model {model_id} is not loaded")
 		
-		return await model["instance"].synthesize(text, speaker_name)
+		return await model["instance"].synthesize(text, speaker_name, language)
 
 	def get_active_model(self) -> Optional[str]:
 		"""Get the currently active model ID."""
 		return self.active_model
 
-	def list_models(self) -> Dict[str, dict]:
-		"""List all available models and their status."""
-		return {
-			model_id: {
-				"name": info["name"],
-				"loaded": info["loaded"],
-				"port": info["instance"].port if info["instance"] else None
+	def list_models(self) -> Dict[str, Dict]:
+		"""List all available models with their status."""
+		result = {}
+		for model_id, model in self.models.items():
+			model_info = {
+				"name": model["name"],
+				"model_name": model["model_name"],
+				"loaded": model["loaded"],
+				"speakers": [],
+				"languages": []
 			}
-			for model_id, info in self.models.items()
-		}
+			if model["loaded"] and model["instance"]:
+				model_info["port"] = model["instance"].port
+				model_info["speakers"] = model["instance"].speakers
+				model_info["languages"] = model["instance"].languages
+			result[model_id] = model_info
+		return result

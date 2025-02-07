@@ -3,135 +3,171 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>{{ title }}</title>
+	<title>{{title}}</title>
 	<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100">
 	<div class="container mx-auto px-4 py-8">
-		<h1 class="text-3xl font-bold mb-8">TTS Controller</h1>
+		<h1 class="text-3xl font-bold mb-8">{{title}}</h1>
 		
 		<!-- Model Control Panel -->
 		<div class="bg-white rounded-lg shadow-md p-6 mb-8">
 			<h2 class="text-xl font-semibold mb-4">Available Models</h2>
-			<div id="modelList" class="space-y-4">
-				<!-- Models will be dynamically inserted here -->
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+				{% for model_id, model in models.items() %}
+				<div class="border rounded-lg p-4 {% if model.loaded %}bg-green-50 border-green-500{% endif %}">
+					<div class="flex justify-between items-start mb-2">
+						<div>
+							<h3 class="font-medium">{{ model.name }}</h3>
+							<p class="text-sm text-gray-600">
+								Status: {{ "Loaded" if model.loaded else "Not Loaded" }}
+								{% if model.loaded %}
+								<br>Port: {{ model.port }}
+								{% endif %}
+							</p>
+						</div>
+					</div>
+					{% if model.loaded %}
+					<button 
+						onclick="unloadModel('{{ model_id }}')"
+						class="w-full mt-2 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded-lg transition-colors">
+						Unload
+					</button>
+					{% else %}
+					<button 
+						onclick="loadModel('{{ model_id }}')"
+						class="w-full mt-2 bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg transition-colors">
+						Load
+					</button>
+					{% endif %}
+				</div>
+				{% endfor %}
 			</div>
 		</div>
 
-		<!-- Text Input Panel -->
+		<!-- Text Synthesis Panel -->
 		<div class="bg-white rounded-lg shadow-md p-6">
 			<h2 class="text-xl font-semibold mb-4">Text Synthesis</h2>
 			<div class="space-y-4">
-				<div class="flex flex-col space-y-2">
-					<label for="textInput" class="font-medium">Text to synthesize:</label>
+				<!-- Text Input -->
+				<div>
+					<label for="text-input" class="block text-sm font-medium text-gray-700 mb-2">
+						Text to synthesize
+					</label>
 					<textarea
-						id="textInput"
-						class="w-full h-32 p-2 border rounded-lg resize-none"
-						placeholder="Enter text to synthesize..."
-					></textarea>
-				</div>
-				
-				<div class="flex flex-col space-y-2">
-					<label for="speakerInput" class="font-medium">Speaker name (optional):</label>
-					<input
-						type="text"
-						id="speakerInput"
-						class="w-full p-2 border rounded-lg"
-						placeholder="Enter speaker name..."
-					/>
+						id="text-input"
+						class="w-full h-32 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						placeholder="Enter text to synthesize..."></textarea>
 				</div>
 
-				<div class="flex items-center space-x-4">
-					<button
-						id="synthesizeBtn"
-						class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 disabled:bg-gray-400"
-						disabled
-					>
-						Synthesize
-					</button>
-					<div id="loadingIndicator" class="hidden">
-						<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+				<!-- Speaker and Language Selection -->
+				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+					<div>
+						<label for="speaker-select" class="block text-sm font-medium text-gray-700 mb-2">
+							Speaker
+						</label>
+						<select
+							id="speaker-select"
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+							<option value="">Default Speaker</option>
+						</select>
+					</div>
+					<div>
+						<label for="language-select" class="block text-sm font-medium text-gray-700 mb-2">
+							Language
+						</label>
+						<select
+							id="language-select"
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+							<option value="">Default Language</option>
+						</select>
 					</div>
 				</div>
 
+				<!-- Synthesize Button -->
+				<button
+					onclick="synthesize()"
+					class="w-full bg-blue-500 hover:bg-blue-600 text-white py-3 px-4 rounded-lg transition-colors">
+					Synthesize
+				</button>
+
 				<!-- Audio Player -->
-				<div id="audioPlayer" class="hidden">
-					<audio controls class="w-full">
-						<source id="audioSource" type="audio/wav">
-						Your browser does not support the audio element.
-					</audio>
-				</div>
+				<audio id="audio-player" class="w-full mt-4" controls></audio>
 			</div>
 		</div>
 	</div>
 
 	<script>
-		let activeModel = null;
-
-		// Fetch and display available models
-		async function fetchModels() {
+		async function updateModelInfo() {
 			try {
-				const response = await fetch('/api/models');
-				const data = await response.json();
-				const modelList = document.getElementById('modelList');
-				modelList.innerHTML = '';
-
-				Object.entries(data.models).forEach(([modelId, model]) => {
-					const modelDiv = document.createElement('div');
-					modelDiv.className = 'flex items-center justify-between p-4 border rounded-lg';
-					modelDiv.innerHTML = `
-						<div>
-							<span class="font-medium">${model.name}</span>
-							${model.port ? `<span class="text-sm text-gray-500 ml-2">(Port: ${model.port})</span>` : ''}
-						</div>
-						<button
-							class="px-4 py-2 rounded-lg ${model.loaded ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white"
-							onclick="toggleModel('${modelId}', ${model.loaded})"
-						>
-							${model.loaded ? 'Unload' : 'Load'}
-						</button>
-					`;
-					modelList.appendChild(modelDiv);
-				});
-
-				// Update synthesize button state
-				const synthesizeBtn = document.getElementById('synthesizeBtn');
-				synthesizeBtn.disabled = !Object.values(data.models).some(m => m.loaded);
-
-				// Update active model
-				activeModel = Object.entries(data.models).find(([_, m]) => m.loaded)?.[0] || null;
-			} catch (error) {
-				console.error('Failed to fetch models:', error);
-			}
-		}
-
-		// Toggle model loading state
-		async function toggleModel(modelId, isLoaded) {
-			try {
-				const action = isLoaded ? 'unload' : 'load';
-				const response = await fetch(`/api/models/${modelId}/${action}`, {
-					method: 'POST'
-				});
+				// 找到当前加载的模型
+				const activeModel = Object.values({{models|tojson}}).find(model => model.loaded);
+				console.log('Active model:', activeModel);
 				
-				if (response.ok) {
-					await fetchModels();
-				} else {
-					const error = await response.json();
-					alert(error.detail || 'Failed to toggle model');
+				if (activeModel) {
+					// 更新说话人选项
+					const speakerSelect = document.getElementById('speaker-select');
+					speakerSelect.innerHTML = '<option value="">Default Speaker</option>';
+					console.log('Speakers:', activeModel.speakers);
+					if (activeModel.speakers && activeModel.speakers.length > 0) {
+						activeModel.speakers.forEach(speaker => {
+							const option = document.createElement('option');
+							option.value = speaker;
+							option.textContent = speaker;
+							speakerSelect.appendChild(option);
+						});
+					}
+
+					// 更新语言选项
+					const languageSelect = document.getElementById('language-select');
+					languageSelect.innerHTML = '<option value="">Default Language</option>';
+					console.log('Languages:', activeModel.languages);
+					if (activeModel.languages && activeModel.languages.length > 0) {
+						activeModel.languages.forEach(language => {
+							const option = document.createElement('option');
+							option.value = language;
+							option.textContent = language;
+							languageSelect.appendChild(option);
+						});
+					}
 				}
 			} catch (error) {
-				console.error('Failed to toggle model:', error);
-				alert('Failed to toggle model');
+				console.error('Error updating model info:', error);
 			}
 		}
 
-		// Handle text synthesis
-		async function synthesizeText() {
-			const text = document.getElementById('textInput').value.trim();
-			const speaker = document.getElementById('speakerInput').value.trim();
-			const synthesizeBtn = document.getElementById('synthesizeBtn');
-			const loadingIndicator = document.getElementById('loadingIndicator');
-			const audioPlayer = document.getElementById('audioPlayer');
+		async function loadModel(modelId) {
+			try {
+				const response = await fetch(`/load_model/${modelId}`, { method: 'POST' });
+				if (response.ok) {
+					location.reload();
+				} else {
+					alert('Failed to load model');
+				}
+			} catch (error) {
+				console.error('Error:', error);
+				alert('Error loading model');
+			}
+		}
+
+		async function unloadModel(modelId) {
+			try {
+				const response = await fetch(`/unload_model/${modelId}`, { method: 'POST' });
+				if (response.ok) {
+					location.reload();
+				} else {
+					alert('Failed to unload model');
+				}
+			} catch (error) {
+				console.error('Error:', error);
+				alert('Error unloading model');
+			}
+		}
+
+		async function synthesize() {
+			const text = document.getElementById('text-input').value;
+			const speaker = document.getElementById('speaker-select').value;
+			const language = document.getElementById('language-select').value;
 			
 			if (!text) {
 				alert('Please enter text to synthesize');
@@ -139,51 +175,43 @@
 			}
 
 			try {
-				synthesizeBtn.disabled = true;
-				loadingIndicator.classList.remove('hidden');
-				audioPlayer.classList.add('hidden');
-
 				const params = new URLSearchParams({
 					text: text,
-					model_id: activeModel
-				});
-				if (speaker) {
-					params.append('speaker_name', speaker);
-				}
-
-				const response = await fetch(`/api/synthesize?${params.toString()}`, {
-					method: 'POST'
+					speaker_name: speaker,
+					language: language
 				});
 
+				const response = await fetch(`/synthesize?${params.toString()}`);
 				if (response.ok) {
 					const blob = await response.blob();
 					const audioUrl = URL.createObjectURL(blob);
-					
-					const audioSource = document.getElementById('audioSource');
-					audioSource.src = audioUrl;
-					
-					const audio = audioPlayer.querySelector('audio');
-					audio.load();
-					audioPlayer.classList.remove('hidden');
+					const audioPlayer = document.getElementById('audio-player');
+					audioPlayer.src = audioUrl;
+					audioPlayer.play();
 				} else {
-					const error = await response.json();
-					alert(error.detail || 'Failed to synthesize text');
+					alert('Failed to synthesize text');
 				}
 			} catch (error) {
-				console.error('Failed to synthesize text:', error);
-				alert('Failed to synthesize text');
-			} finally {
-				synthesizeBtn.disabled = false;
-				loadingIndicator.classList.add('hidden');
+				console.error('Error:', error);
+				alert('Error synthesizing text');
 			}
 		}
 
-		// Initialize
-		document.addEventListener('DOMContentLoaded', () => {
-			fetchModels();
-			
-			// Add click handler for synthesize button
-			document.getElementById('synthesizeBtn').addEventListener('click', synthesizeText);
+		// 页面加载时更新模型信息
+		document.addEventListener('DOMContentLoaded', updateModelInfo);
+
+		// 每次加载新模型后更新选项
+		const observer = new MutationObserver(function(mutations) {
+			mutations.forEach(function(mutation) {
+				if (mutation.type === 'childList') {
+					updateModelInfo();
+				}
+			});
+		});
+
+		observer.observe(document.querySelector('.grid'), {
+			childList: true,
+			subtree: true
 		});
 	</script>
 </body>
