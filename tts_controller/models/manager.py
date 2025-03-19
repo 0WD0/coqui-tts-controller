@@ -8,6 +8,7 @@ import os
 import signal
 import time
 import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +16,12 @@ class TTSServer:
 	"""Represents a running TTS server instance."""
 	
 	def __init__(self, model_name: str, port: int):
-		self.model_name = model_name
-		self.port = port
-		self.url = f"http://localhost:{port}"
-		self.process: subprocess.Popen | None = None
-		self.speakers = []
-		self.languages = []
+		self.model_name : str = model_name
+		self.port : int = port
+		self.url : str = f"http://localhost:{port}"
+		self.process : subprocess.Popen[str] | None = None
+		self.speakers : list[str] = []
+		self.languages : list[str] = []
 
 	async def _fetch_model_info(self) -> bool:
 		"""获取模型支持的 speakers 和 languages"""
@@ -97,7 +98,7 @@ class TTSServer:
 			
 		except Exception as e:
 			logger.error(f"Failed to start TTS server {self.model_name}: {str(e)}")
-			if self.process:
+			if self.process and self.process.stderr:
 				stderr = self.process.stderr.read()
 				logger.error(f"Process stderr: {stderr}")
 			return False
@@ -204,9 +205,9 @@ class TTSModelManager:
 	"""Manages the loading and unloading of TTS models."""
 	
 	def __init__(self, venv_path: str = "~/test/tts/.venv"):
-		self.venv_path = os.path.expanduser(venv_path)
-		self.base_port = 5002
-		self.models: dict[str, dict] = {
+		self.venv_path : str = os.path.expanduser(venv_path)
+		self.base_port : int = 5002
+		self.models: dict[str, dict[str, Any]] = {
 			"xtts_v2": {
 				"name": "XTTS v2",
 				"model_name": "tts_models/multilingual/multi-dataset/xtts_v2",
@@ -314,7 +315,7 @@ class TTSModelManager:
 		"""Get the currently active model ID."""
 		return self.active_model
 
-	def list_models(self) -> dict[str, dict]:
+	def list_models(self) -> dict[str, dict[str, str]]:
 		"""List all available models with their status."""
 		result = {}
 		for model_id, model in self.models.items():
