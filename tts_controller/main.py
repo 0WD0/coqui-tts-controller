@@ -2,7 +2,6 @@ from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from typing import Optional
 import uvicorn
 import logging
 
@@ -61,10 +60,10 @@ async def unload_model(model_id: str):
 @app.get("/synthesize")
 async def synthesize(
 	text: str,
-	model_id: Optional[str] = None,
-	speaker_id: Optional[str] = None,
-	language_id: Optional[str] = None,
-	style_wav: Optional[str] = None
+	model_id: str | None = None,
+	speaker_id: str | None = None,
+	language_id: str | None = None,
+	style_wav: str | None = None
 ) -> Response:
 	"""Synthesize text to speech."""
 	try:

@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import subprocess
-from typing import Dict, Optional
 import requests
 import os
 import signal
@@ -19,7 +18,7 @@ class TTSServer:
 		self.model_name = model_name
 		self.port = port
 		self.url = f"http://localhost:{port}"
-		self.process: Optional[subprocess.Popen] = None
+		self.process: subprocess.Popen | None = None
 		self.speakers = []
 		self.languages = []
 
@@ -145,7 +144,7 @@ class TTSServer:
 		except Exception as e:
 			logger.warning(f"Failed to kill process on port {port}: {str(e)}")
 
-	async def synthesize(self, text: str, speaker_id: Optional[str] = None, language_id: Optional[str] = None) -> Optional[bytes]:
+	async def synthesize(self, text: str, speaker_id: str | None = None, language_id: str | None = None) -> bytes | None:
 		"""Synthesize text using the TTS server."""
 		try:
 			params = {
@@ -207,7 +206,7 @@ class TTSModelManager:
 	def __init__(self, venv_path: str = "~/test/tts/.venv"):
 		self.venv_path = os.path.expanduser(venv_path)
 		self.base_port = 5002
-		self.models: Dict[str, dict] = {
+		self.models: dict[str, dict] = {
 			"xtts_v2": {
 				"name": "XTTS v2",
 				"model_name": "tts_models/multilingual/multi-dataset/xtts_v2",
@@ -233,7 +232,7 @@ class TTSModelManager:
 				"instance": None
 			}
 		}
-		self.active_model: Optional[str] = None
+		self.active_model: str | None = None
 
 	async def load_model(self, model_id: str) -> bool:
 		"""Load a specific TTS model."""
@@ -296,7 +295,7 @@ class TTSModelManager:
 			logger.error(f"Failed to unload model {model_id}: {str(e)}")
 			return False
 
-	async def synthesize(self, text: str, model_id: Optional[str] = None, speaker_id: Optional[str] = None, language_id: Optional[str] = None) -> Optional[bytes]:
+	async def synthesize(self, text: str, model_id: str | None = None, speaker_id: str | None = None, language_id: str | None = None) -> bytes | None:
 		"""Synthesize text using the specified or active model."""
 		model_id = model_id or self.active_model
 		if not model_id:
@@ -311,11 +310,11 @@ class TTSModelManager:
 		
 		return await model["instance"].synthesize(text, speaker_id, language_id)
 
-	def get_active_model(self) -> Optional[str]:
+	def get_active_model(self) -> str | None:
 		"""Get the currently active model ID."""
 		return self.active_model
 
-	def list_models(self) -> Dict[str, Dict]:
+	def list_models(self) -> dict[str, dict]:
 		"""List all available models with their status."""
 		result = {}
 		for model_id, model in self.models.items():
